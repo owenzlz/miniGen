@@ -24,6 +24,9 @@ samples/
 # Allow diagram images in paradigm READMEs
 !paradigms/**/*_diagram.png
 
+# Allow data visualization images
+!data/assets/*.png
+
 # Assets - ignore frame images but keep videos
 assets/**/images/
 
