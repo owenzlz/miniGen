@@ -13,3 +13,10 @@ python train.py --config configs/continuous_normalizing_flow/CNF_MLP_SwissRoll.y
 python train.py --config configs/consistency_training/ConsistencyTraining_MLP_SwissRoll.yaml --skip_save_ckpt
 python train.py --config configs/autoencoder/AE_MLP_SwissRoll.yaml --skip_save_ckpt
 python train.py --config configs/improved_meanflow/iMF_MLP_SwissRoll.yaml --skip_save_ckpt
+python train.py --config configs/meanflow/MeanFlow_MLP_SwissRoll.yaml --skip_save_ckpt
+python train.py --config configs/alpha_flow/AlphaFlow_MLP_SwissRoll.yaml --skip_save_ckpt
+python train.py --config configs/autoregressive/Autoregressive_Transformer_SwissRoll.yaml --skip_save_ckpt
+python train.py --config configs/drifting_model/DriftingModel_MLP_SwissRoll.yaml --skip_save_ckpt
+python train.py --config configs/energy_based_model/EBM_MLP_SwissRoll.yaml --skip_save_ckpt
+python train.py --config configs/equilibrium_matching/EqM_MLP_SwissRoll.yaml --skip_save_ckpt
+python train.py --config configs/shortcut_model/ShortcutModel_MLP_SwissRoll.yaml --skip_save_ckpt
