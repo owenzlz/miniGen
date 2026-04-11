@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+
+# Resource (i.e. external git repositories)
+resource/
+
+# Logs and checkpoints
+logs/
+launch_all.log
+*.pt
+*.pth
+*.ckpt
+
+# Samples
+samples/
+*.png
+*.jpg
+*.jpeg
+
+# Allow diagram images in paradigm READMEs
+!paradigms/**/*_diagram.png
+
+# Assets - ignore frame images but keep videos
+assets/**/images/
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+.DS_Store
+*.npz
+
+prompt.txt
+ckpt/

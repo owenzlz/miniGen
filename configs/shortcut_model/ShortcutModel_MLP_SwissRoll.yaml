@@ -1,0 +1,51 @@
+# Shortcut Models on 2D Synthetic Data
+# Extends flow matching with step-size conditioning for flexible inference budgets
+# Reference: Frans et al., "One Step Diffusion via Shortcut Models", 2024
+
+type: "shortcut_model"
+gen_mode: "synthetic2d"
+
+# Model configuration (ShortcutMLPDenoiser = MLPDenoiser + dt_base embedding)
+model:
+  type: "shortcut_mlp"
+  input_dim: 2
+  hidden_size: 256
+  depth: 6
+  num_classes: 0
+  class_dropout_prob: 0.0
+
+# Shortcut model configuration
+shortcut_model:
+  num_steps: 128           # N: finest resolution (128-step base FM)
+  bootstrap_every: 4       # 1/4 of batch for self-consistency, 3/4 for base FM
+
+# Data configuration
+data:
+  name: "synthetic2d"
+  distribution: "swiss_roll"
+  num_samples: 100000
+  batch_size: 256
+  num_workers: 0
+
+# Training configuration
+training:
+  exp_name: "shortcut_model_swiss_roll"
+  log_dir: "./logs"
+  seed: 42
+  total_steps: 40000
+  log_freq: 100
+  save_freq: 5000
+  vis_freq: 50
+  grad_clip: 1.0
+
+  optimizer:
+    type: "adamw"
+    lr: 5.0e-4
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 0.01
+
+# Inference settings
+inference:
+  num_samples: 1000
+  num_steps: 1             # Showcase single-step generation

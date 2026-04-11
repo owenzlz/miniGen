@@ -1,0 +1,52 @@
+# Flow Matching on 2D Synthetic Data
+# Great for visualizing flow dynamics
+
+type: "flow_matching"  # Generative model type: ddpm (denoising diffusion) or flow_matching (continuous normalizing flows)
+gen_mode: "synthetic2d"    # Generation mode: synthetic2d (2D point clouds) or image (pixel images)
+
+# Flow matching configuration
+flow:
+  solver: "euler"          # ODE solver for integration: euler (1st-order, fast) or heun (2nd-order, more accurate)
+  # heun is 2nd-order accurate but requires 2x model evaluations per step
+
+# Model configuration (MLP denoiser for low-dimensional data)
+model:
+  type: "mlp"              # Model architecture: mlp (for synthetic data) or dit (for images)
+  input_dim: 2             # Input data dimensionality (2 for 2D points)
+  hidden_size: 256         # Hidden layer dimension in MLP
+  depth: 6                 # Number of hidden layers in MLP
+  num_classes: 0           # Number of classes for conditional generation (0 = unconditional; 8 for gaussian_mixture, 2 for moons/circles)
+  class_dropout_prob: 0.0  # Probability of dropping class label (only used if num_classes > 0)
+
+# Data configuration
+data:
+  name: "synthetic2d"      # Dataset name identifier
+  distribution: "checkerboard"  # Target distribution: gaussian_mixture, swiss_roll, moons, or circles
+  num_samples: 100000      # Total number of samples in the synthetic dataset
+  batch_size: 256          # Number of samples per training batch
+  num_workers: 0           # Number of parallel data loading workers (0 for in-memory datasets)
+
+# Training configuration
+training:
+  exp_name: "flow_matching_checkerboard"  # Experiment name (used for logging and checkpoint directories)
+  log_dir: "./logs"        # Root directory for saving logs and checkpoints
+  seed: 42                 # Random seed for reproducibility
+  total_steps: 20000       # Total number of training iterations (converges fast on synthetic data)
+  log_freq: 100            # Log training metrics every N steps
+  save_freq: 5000          # Save model checkpoint every N steps
+  vis_freq: 50             # Generate visualization plots every N steps
+  grad_clip: 1.0           # Maximum gradient norm for gradient clipping (prevents exploding gradients)
+
+  optimizer:
+    type: "adamw"          # Optimizer type: adamw (Adam with decoupled weight decay)
+    lr: 1.0e-3             # Learning rate (higher LR works for simple synthetic tasks)
+    beta1: 0.9             # Adam beta1 parameter (first moment exponential decay rate)
+    beta2: 0.999           # Adam beta2 parameter (second moment exponential decay rate)
+    weight_decay: 0.0      # L2 regularization coefficient (0.0 = no weight decay)
+
+# Inference settings for validation/evaluation during training
+inference:
+  num_samples: 1000        # Number of samples to generate for evaluation
+  num_steps: 50            # Number of ODE solver steps for sampling (more steps = higher quality but slower)
+  solver: "euler"          # ODE solver for inference: euler or heun
+  cfg_scale: 1.0           # Classifier-free guidance scale (1.0 = no guidance)

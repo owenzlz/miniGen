@@ -1,0 +1,52 @@
+# Improved MeanFlow (iMF) on 2D Synthetic Data
+# Learns average velocity field for exact 1-step generation
+# Reference: Geng et al., "Improved Mean Flows", arXiv:2512.02012
+
+type: "improved_meanflow"
+gen_mode: "synthetic2d"
+
+# iMF configuration
+improved_meanflow:
+  data_proportion: 0.5       # Fraction of batch with r=t (flow matching regime)
+  logit_normal_mean: -0.4    # Mean of logit-normal time distribution
+  logit_normal_std: 1.0      # Std of logit-normal time distribution
+  norm_p: 0.0                # Disable adaptive weighting (1.0 = reference default)
+
+# Model configuration (dual-head MLP)
+model:
+  type: "imf_mlp"
+  input_dim: 2
+  hidden_size: 256
+  shared_depth: 2            # Number of shared backbone blocks
+  head_depth: 4              # Number of blocks per head (u-head and v-head)
+
+# Data configuration
+data:
+  name: "synthetic2d"
+  distribution: "swiss_roll"
+  num_samples: 100000
+  batch_size: 256
+  num_workers: 0
+
+# Training configuration
+training:
+  exp_name: "improved_meanflow_swiss_roll"
+  log_dir: "./logs"
+  seed: 42
+  total_steps: 20000
+  log_freq: 100
+  save_freq: 5000
+  vis_freq: 50
+  grad_clip: 1.0
+
+  optimizer:
+    type: "adamw"
+    lr: 1.0e-3
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 0.0
+
+# Inference settings
+inference:
+  num_samples: 1000
+  num_steps: 100              # Multi-step Euler (use 1 for exact 1-NFE)

@@ -1,0 +1,340 @@
+"""
+Visualize the score/velocity field over inference timesteps.
+
+Trains a model from scratch, then sweeps over inference timesteps to show how
+the learned score (or velocity) field varies with the noise level / time.
+
+Supported paradigms:
+    - ddpm: eps-prediction -> score via -eps / sqrt(1 - alpha_bar_t), timesteps T-1 -> 0
+    - score_matching_ncsn: noise prediction -> score via -pred / sigma_i, levels 0 -> L-1
+    - flow_matching: velocity field v(x, t), time 1 -> 0
+
+Output structure:
+    assets/score_field_over_timestep/{dataset_name}/{paradigm_type}/
+        images/                     (per-frame PNG files)
+        {paradigm_type}_{dataset_name}_score_field_over_timestep.mp4
+
+Usage:
+    python scripts/visualize_score_field_over_timestep.py --type ddpm
+    python scripts/visualize_score_field_over_timestep.py --type score_matching_ncsn --grid_size 25
+    python scripts/visualize_score_field_over_timestep.py --type flow_matching --num_frames 50
+"""
+import argparse
+import sys
+from pathlib import Path
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import numpy as np
+import torch
+import torch.nn as nn
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from omegaconf import OmegaConf
+from tqdm import tqdm
+
+from data import create_dataloader
+from scripts.utils import PARADIGM_TO_CONFIG
+from utils import (
+    compute_axis_limits,
+    create_model,
+    create_generative_process,
+    create_optimizer,
+    get_target_samples,
+    images_to_video,
+)
+
+SUPPORTED_PARADIGMS = ["ddpm", "score_matching_ncsn", "flow_matching"]
+
+
+def get_inference_timesteps(paradigm_type, process, num_frames):
+    """Get ordered timesteps for inference visualization (high noise -> low noise).
+
+    Returns:
+        List of (timestep_value, label_string) tuples.
+    """
+    if paradigm_type == "ddpm":
+        T = process.schedule.num_timesteps
+        num_frames = min(num_frames, T)
+        indices = np.linspace(T - 1, 0, num_frames).astype(int)
+        # Remove duplicates while preserving order
+        seen = set()
+        unique = []
+        for idx in indices:
+            if int(idx) not in seen:
+                seen.add(int(idx))
+                unique.append(int(idx))
+        return [(idx, f"t={idx}") for idx in unique]
+
+    elif paradigm_type == "score_matching_ncsn":
+        L = process.num_noise_levels
+        num_frames = min(num_frames, L)
+        indices = np.linspace(0, L - 1, num_frames).astype(int)
+        seen = set()
+        unique = []
+        for idx in indices:
+            if int(idx) not in seen:
+                seen.add(int(idx))
+                unique.append(int(idx))
+        sigmas = process.sigmas.cpu().numpy()
+        return [(idx, f"\u03c3={sigmas[idx]:.3f}") for idx in unique]
+
+    elif paradigm_type == "flow_matching":
+        times = np.linspace(1.0, 0.0, num_frames)
+        return [(float(t), f"t={t:.3f}") for t in times]
+
+    else:
+        raise ValueError(f"Unsupported paradigm: {paradigm_type}")
+
+
+def compute_score_at_timestep(model, grid_points, paradigm_type, process, timestep, device):
+    """Compute score/velocity vectors at a specific timestep.
+
+    Args:
+        model: Trained model.
+        grid_points: Tensor of shape (N, 2) in normalized [-1, 1] space.
+        paradigm_type: One of SUPPORTED_PARADIGMS.
+        process: The generative process instance.
+        timestep: For ddpm/ncsn, an integer index. For flow_matching, a float in [0, 1].
+        device: Torch device.
+
+    Returns:
+        Score/velocity vectors as numpy array of shape (N, 2).
+    """
+    grid = grid_points.to(device)
+    batch_size = grid.shape[0]
+
+    if paradigm_type == "ddpm":
+        t = torch.full((batch_size,), timestep, device=device, dtype=torch.long)
+        sqrt_one_minus_alpha = process.schedule.sqrt_one_minus_alphas_cumprod.to(device)[timestep]
+        eps_pred = model(grid, t)
+        score = -eps_pred / sqrt_one_minus_alpha
+
+    elif paradigm_type == "score_matching_ncsn":
+        t = torch.full((batch_size,), timestep, device=device, dtype=torch.long)
+        sigma = process.sigmas.to(device)[timestep]
+        noise_pred = model(grid, t)
+        score = -noise_pred / sigma
+
+    elif paradigm_type == "flow_matching":
+        t = torch.full((batch_size,), timestep, device=device, dtype=torch.float32)
+        score = model(grid, t)  # velocity field
+
+    else:
+        raise ValueError(f"Unsupported paradigm: {paradigm_type}")
+
+    return score.detach().cpu().numpy()
+
+
+def visualize_score_field(
+    score_vectors,
+    grid_x,
+    grid_y,
+    target_samples,
+    save_path,
+    title="",
+    data_min=None,
+    data_range=None,
+):
+    """Save a quiver plot of the score field with target data as background.
+
+    Args:
+        score_vectors: Score array of shape (grid_size*grid_size, 2) in normalized space.
+        grid_x: Meshgrid X coordinates in denorm space, shape (grid_size, grid_size).
+        grid_y: Meshgrid Y coordinates in denorm space, shape (grid_size, grid_size).
+        target_samples: Target data points (N, 2) in normalized [-1, 1] space.
+        save_path: Path to save the figure.
+        title: Plot title.
+        data_min: Min values for denormalization.
+        data_range: Range values for denormalization.
+    """
+    grid_size = grid_x.shape[0]
+
+    # Denormalize score vectors to denorm space (scale only, not shift)
+    u = score_vectors[:, 0].reshape(grid_size, grid_size)
+    v = score_vectors[:, 1].reshape(grid_size, grid_size)
+    if data_range is not None:
+        u = u * data_range[0] / 2
+        v = v * data_range[1] / 2
+
+    # Denormalize target samples for background
+    target_denorm = target_samples
+    if data_min is not None and data_range is not None:
+        target_denorm = (target_samples + 1) / 2 * data_range + data_min
+
+    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
+
+    # Background: faint gray scatter of target data
+    ax.scatter(
+        target_denorm[:, 0], target_denorm[:, 1],
+        s=2, alpha=0.15, color='gray', zorder=1,
+    )
+
+    # Foreground: red quiver arrows for score/velocity vectors
+    ax.quiver(
+        grid_x, grid_y, u, v,
+        color='red', alpha=0.8, scale=None, zorder=2,
+    )
+
+    xlim, ylim = compute_axis_limits(data_min, data_range)
+    ax.set_xlim(*xlim)
+    ax.set_ylim(*ylim)
+    ax.set_aspect('equal')
+    ax.set_title(title)
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Visualize score/velocity field over inference timesteps."
+    )
+    parser.add_argument(
+        "--type", type=str, required=True,
+        choices=SUPPORTED_PARADIGMS,
+        help="Generative paradigm type.",
+    )
+    parser.add_argument(
+        "--total_steps", type=int, default=5000,
+        help="Number of training iterations (default: 5000).",
+    )
+    parser.add_argument(
+        "--num_frames", type=int, default=60,
+        help="Number of timestep frames to visualize (default: 60).",
+    )
+    parser.add_argument(
+        "--fps", type=int, default=3,
+        help="Frames per second for the output video (default: 3).",
+    )
+    parser.add_argument(
+        "--grid_size", type=int, default=20,
+        help="Number of grid points per axis for quiver plot (default: 20).",
+    )
+    parser.add_argument(
+        "--output_dir", type=str, default="assets",
+        help="Root output directory (default: assets).",
+    )
+    args = parser.parse_args()
+
+    # Load default config for this paradigm
+    config_path = PROJECT_ROOT / PARADIGM_TO_CONFIG[args.type]
+    cfg = OmegaConf.load(config_path)
+    cfg.training.total_steps = args.total_steps
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    dataset_name = cfg.data.distribution
+    paradigm_type = cfg.type
+
+    # Output paths
+    output_dir = PROJECT_ROOT / args.output_dir / "score_field_over_timestep" / dataset_name / paradigm_type
+    img_dir = output_dir / "images"
+    img_dir.mkdir(parents=True, exist_ok=True)
+    video_path = output_dir / f"{paradigm_type}_{dataset_name}_score_field_over_timestep.mp4"
+
+    print(f"Paradigm:    {paradigm_type}")
+    print(f"Dataset:     {dataset_name}")
+    print(f"Training:    {args.total_steps} steps")
+    print(f"Frames:      {args.num_frames}")
+    print(f"Grid:        {args.grid_size}x{args.grid_size}")
+    print(f"Output:      {output_dir}")
+
+    # Create model, process, optimizer, dataloader
+    model = create_model(cfg, device=device, inference=False)
+    process = create_generative_process(cfg, device)
+    optimizer = create_optimizer(model, cfg)
+    dataloader = create_dataloader(cfg)
+
+    # Pre-fetch target samples for background scatter
+    target_samples, _, data_min, data_range = get_target_samples(
+        dataloader, 1000, key="tenPoints"
+    )
+    if target_samples is not None:
+        target_samples = target_samples.numpy()
+
+    # Build evaluation grid in denorm space, then normalize to [-1, 1]
+    xlim, ylim = compute_axis_limits(data_min, data_range)
+    coords_x = np.linspace(xlim[0], xlim[1], args.grid_size)
+    coords_y = np.linspace(ylim[0], ylim[1], args.grid_size)
+    gx, gy = np.meshgrid(coords_x, coords_y)
+    grid_denorm = np.stack([gx.ravel(), gy.ravel()], axis=-1)  # (G*G, 2)
+
+    if data_min is not None and data_range is not None:
+        grid_norm = 2 * (grid_denorm - data_min) / data_range - 1
+    else:
+        grid_norm = grid_denorm
+    grid_tensor = torch.tensor(grid_norm, dtype=torch.float32)
+
+    grad_clip = cfg.training.get("grad_clip", 1.0)
+
+    # ---- Phase 1: Train the model ----
+    print(f"\nPhase 1: Training {paradigm_type} for {args.total_steps} steps ...")
+    model.train()
+    data_iter = iter(dataloader)
+
+    for step in tqdm(range(args.total_steps), desc=f"Training {paradigm_type}"):
+        try:
+            batch = next(data_iter)
+        except StopIteration:
+            data_iter = iter(dataloader)
+            batch = next(data_iter)
+
+        x0 = batch["tenPoints"].to(device)
+        y = batch.get("intLabel")
+        if y is not None:
+            y = y.to(device)
+
+        if hasattr(process, "train_step"):
+            process.train_step(model, x0, optimizer, y=y, grad_clip=grad_clip)
+        else:
+            t = process.sample_timesteps(x0.shape[0], device)
+            loss = process.training_loss(model, x0, t, y=y)
+            optimizer.zero_grad()
+            loss.backward()
+            if grad_clip > 0:
+                nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+            optimizer.step()
+
+    # ---- Phase 2: Visualize score field over inference timesteps ----
+    inference_timesteps = get_inference_timesteps(paradigm_type, process, args.num_frames)
+
+    field_name = "velocity field" if paradigm_type == "flow_matching" else "score field"
+    print(f"\nPhase 2: Visualizing {field_name} over {len(inference_timesteps)} timesteps ...")
+
+    model.eval()
+    for frame_idx, (ts_val, ts_label) in enumerate(
+        tqdm(inference_timesteps, desc=f"Visualizing {field_name}")
+    ):
+        with torch.no_grad():
+            score_vectors = compute_score_at_timestep(
+                model, grid_tensor, paradigm_type, process, ts_val, device
+            )
+
+        save_path = img_dir / f"frame_{frame_idx:07d}.png"
+        visualize_score_field(
+            score_vectors=score_vectors,
+            grid_x=gx,
+            grid_y=gy,
+            target_samples=target_samples,
+            save_path=save_path,
+            title=f"{paradigm_type} {field_name} at {ts_label}",
+            data_min=data_min,
+            data_range=data_range,
+        )
+
+    # Stitch frames into video
+    num_frames_actual = len(inference_timesteps)
+    print(f"\nStitching {num_frames_actual} frames into video at {args.fps} fps ...")
+    images_to_video(img_dir, video_path, fps=args.fps, filename_pattern="frame_%07d.png")
+    print(f"Video saved to {video_path}")
+
+
+if __name__ == "__main__":
+    main()

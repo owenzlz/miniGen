@@ -1,0 +1,57 @@
+# Equilibrium Matching (EqM) on 2D Synthetic Data
+# Learns an equilibrium gradient field — bridges flow matching and energy-based models
+
+type: "equilibrium_matching"
+gen_mode: "synthetic2d"
+
+# EqM configuration
+equilibrium_matching:
+  sampler: "langevin"           # Sampling: gd, ngd (Nesterov), or langevin
+  stepsize: 0.0017              # Step size for sampling (paper default)
+  num_sampling_steps: 1000      # Number of sampling steps
+  mu: 0.3                       # NAG-GD momentum (only for ngd)
+  noise_scale: 2.0              # Langevin noise scale (only for langevin)
+  noise_end: 0.01               # End noise scale for annealed Langevin
+  langevin_anneal: true         # Anneal noise from noise_scale to noise_end
+
+# Model configuration (MLP denoiser, but model always receives t=0)
+model:
+  type: "mlp"
+  input_dim: 2
+  hidden_size: 256
+  depth: 6
+  num_classes: 0
+  class_dropout_prob: 0.0
+
+# Data configuration
+data:
+  name: "synthetic2d"
+  distribution: "checkerboard"
+  num_samples: 100000
+  batch_size: 256
+  num_workers: 0
+
+# Training configuration
+training:
+  exp_name: "equilibrium_matching_checkerboard"
+  log_dir: "./logs"
+  seed: 42
+  total_steps: 20000
+  log_freq: 100
+  save_freq: 5000
+  vis_freq: 50
+  grad_clip: 1.0
+  ema_decay: 0.9999
+
+  optimizer:
+    type: "adamw"
+    lr: 1.0e-4
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 0.0
+
+# Inference settings
+inference:
+  num_samples: 1000
+  num_steps: 1000
+  cfg_scale: 1.0

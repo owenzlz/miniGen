@@ -1,0 +1,74 @@
+# Energy-Based Model with Contrastive Divergence on 2D Synthetic Data
+# Learns an energy landscape E(x) where p(x) ~ exp(-E(x))
+#
+# Key tuning insights (from extensive hyperparameter search):
+# - No spectral norm: SN constrains Lipschitz constant, preventing sharp energy
+#   gradients between close spiral arms (~0.5 apart). Without SN, the energy
+#   function can learn fine-grained structure.
+# - Gradient clipping: replaces SN for stability — prevents energy divergence
+#   without limiting expressivity.
+# - Annealed Langevin inference: start with high noise (exploration) then anneal
+#   to low noise (exploitation). Critical for finding modes from random init.
+# - Data-initialized CD: 50% of training negatives start from data+noise (local
+#   structure), 50% from replay buffer (global gradient).
+# - Low cd_noise_scale: gradient-dominated training MCMC produces better negatives.
+
+type: "energy_based_model"
+gen_mode: "synthetic2d"
+
+# Model configuration (Energy MLP)
+model:
+  type: "energy_mlp"
+  input_dim: 2
+  hidden_size: 256
+  depth: 6
+  use_spectral_norm: false       # No SN — allows sharp energy gradients between spiral arms
+
+# EBM / Contrastive Divergence configuration
+energy_based_model:
+  cd_steps: 60                   # Langevin MCMC steps for generating negatives
+  cd_step_size: 0.1              # Step size for training MCMC
+  cd_data_init: true             # Mix data+noise and buffer for negative init
+  cd_noise_std: 0.3              # Noise std when using data-initialized CD
+  cd_noise_scale: 0.1            # Noise multiplier for training MCMC (gradient-dominated)
+  buffer_size: 10000             # Replay buffer size
+  reinit_freq: 0.05              # Fraction of negatives from noise (vs buffer)
+  energy_reg: 0.1                # Regularization on energy magnitudes
+  langevin_steps: 3000           # Langevin steps for sampling (inference)
+  langevin_step_size: 0.1        # Step size for sampling Langevin dynamics
+  langevin_grad_clip: 1.0        # Max gradient norm per sample during MCMC
+  langevin_clamp: 5.0            # Clamp sample coordinates during MCMC
+  langevin_noise_scale: 0.5      # Starting noise multiplier for annealed inference
+  langevin_anneal: true          # Anneal noise during inference MCMC
+  langevin_noise_end: 0.01       # Final noise multiplier after annealing
+
+# Data configuration
+data:
+  name: "synthetic2d"
+  distribution: "checkerboard"
+  num_samples: 100000
+  batch_size: 256
+  num_workers: 0
+
+# Training configuration
+training:
+  exp_name: "energy_based_model_checkerboard"
+  log_dir: "./logs"
+  seed: 42
+  total_steps: 20000
+  log_freq: 100
+  save_freq: 5000
+  vis_freq: 50
+  grad_clip: 1.0
+
+  optimizer:
+    type: "adamw"
+    lr: 1.0e-4                   # Lower lr for stability without SN
+    beta1: 0.9
+    beta2: 0.999
+    weight_decay: 0.0
+
+# Inference settings
+inference:
+  num_samples: 1000
+  num_steps: 3000                # Annealed Langevin steps for sampling
