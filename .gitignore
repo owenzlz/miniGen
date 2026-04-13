@@ -30,9 +30,14 @@ samples/
 # Assets - ignore frame images but keep videos
 assets/**/images/
 
+# Virtual environment
+.venv/
+
 # IDE
 .vscode/
 .idea/
+.claude/
+CLAUDE.md
 
 # Misc
 .DS_Store

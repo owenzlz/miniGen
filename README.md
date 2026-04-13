@@ -127,9 +127,24 @@ Training outputs are saved to `logs/{timestamp}_{exp_name}/`:
 - `saved_checkpoints/` — model checkpoints
 - `visualize.html` — interactive image gallery
 
+## Quick Start
+
+This project uses [uv](https://docs.astral.sh/uv/) for environment management.
+
+```bash
+uv sync
+```
+
+This installs all dependencies (PyTorch, NumPy, matplotlib, OmegaConf, tqdm) into a local `.venv`. The PyTorch wheel is platform-aware: CUDA-enabled on Linux (x86_64), CPU+MPS on macOS (Apple Silicon).
+
+Then run training with:
+
+```bash
+uv run python train.py --config configs/flow_matching/FlowMatching_MLP_SwissRoll.yaml
+```
+
 ## Requirements
 
 - Python 3.10+
-- PyTorch
-- OmegaConf
-- tqdm
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip
+- PyTorch, NumPy, matplotlib, OmegaConf, tqdm (managed by `pyproject.toml`)
